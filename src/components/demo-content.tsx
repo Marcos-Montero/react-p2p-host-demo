@@ -53,12 +53,38 @@ function normalizePastedCode(raw: string): string {
   return raw.trim().replace(/\s+/g, "");
 }
 
+function urlSafeBase64ToStandard(s: string): string {
+  return s.replace(/-/g, "+").replace(/_/g, "/");
+}
+
+function ensureBase64Padding(s: string): string {
+  const remainder = s.length % 4;
+  if (remainder === 0) return s;
+  return s + "=".repeat(4 - remainder);
+}
+
+function deduplicateCodeIfRepeated(s: string): string {
+  if (s.length < 40 || s.length % 2 !== 0) return s;
+  const half = s.length / 2;
+  if (s.slice(0, half) === s.slice(half)) return s.slice(0, half);
+  return s;
+}
+
 function extractCodeFromPaste(pasted: string): string {
   const normalized = normalizePastedCode(pasted);
   const base64Like = normalized.match(/[A-Za-z0-9+/=-]+/g);
   if (base64Like && base64Like.length > 0) {
     const longest = base64Like.reduce((a, b) => (a.length >= b.length ? a : b));
-    if (longest.length > 20) return longest;
+    if (longest.length > 20) {
+      const half = Math.floor(longest.length / 2);
+      if (
+        half > 20 &&
+        longest.slice(0, half) === longest.slice(half, half * 2)
+      ) {
+        return longest.slice(0, half);
+      }
+      return longest;
+    }
   }
   return normalized;
 }
@@ -230,7 +256,10 @@ export function DemoContent() {
     setConnectError(null);
     setConnectingInProgress(true);
     try {
-      await applyAnswerAsHost(normalizedAnswer);
+      let forLibrary = deduplicateCodeIfRepeated(normalizedAnswer);
+      forLibrary = urlSafeBase64ToStandard(forLibrary);
+      forLibrary = ensureBase64Padding(forLibrary);
+      await applyAnswerAsHost(forLibrary);
       setAnswerInput("");
     } catch (err) {
       setConnectError(err instanceof Error ? err.message : "Connection failed");
