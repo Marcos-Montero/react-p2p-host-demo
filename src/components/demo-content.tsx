@@ -64,9 +64,12 @@ function ensureBase64Padding(s: string): string {
 }
 
 function deduplicateCodeIfRepeated(s: string): string {
-  if (s.length < 40 || s.length % 2 !== 0) return s;
-  const half = s.length / 2;
+  if (s.length < 80) return s;
+  const half = Math.floor(s.length / 2);
   if (s.slice(0, half) === s.slice(half)) return s.slice(0, half);
+  for (let i = 1; i <= half; i++) {
+    if (s.startsWith(s.slice(i))) return s.slice(0, i);
+  }
   return s;
 }
 
