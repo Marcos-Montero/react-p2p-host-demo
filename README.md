@@ -1,36 +1,31 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# react-p2p-host — Demo
 
-## Getting Started
+Official demo of [react-p2p-host](https://www.npmjs.com/package/react-p2p-host): P2P room in the browser with no server and real-time chat.
 
-First, run the development server:
+## Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Local server + LAN (e.g. PC + phone)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+WebRTC often **does not work** when one device opens the app over HTTP via LAN (e.g. `http://192.168.1.x:3000`). Browsers treat this as a non-secure context and may block or limit WebRTC.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **To test with two devices:** use the [deployed demo](https://react-p2p-host.vercel.app) (HTTPS).
+- **To test locally:** open two tabs on the same machine at `http://localhost:3000` (Create room in one, paste the link in the other).
 
-## Learn More
+The app shows a notice when it detects it is running over HTTP (non-localhost) and suggests these options.
 
-To learn more about Next.js, take a look at the following resources:
+## Static build
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run build
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+This produces the `out/` folder, ready to host as static files.
 
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Connect this repo in [Vercel](https://vercel.com) and deploy. To get a URL like `react-p2p-host.vercel.app`, create the project with that name in the Vercel dashboard.
