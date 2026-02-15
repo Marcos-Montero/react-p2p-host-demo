@@ -49,6 +49,20 @@ function extractOfferFromInput(raw: string): string {
   return trimmed;
 }
 
+function normalizePastedCode(raw: string): string {
+  return raw.trim().replace(/\s+/g, "");
+}
+
+function extractCodeFromPaste(pasted: string): string {
+  const normalized = normalizePastedCode(pasted);
+  const base64Like = normalized.match(/[A-Za-z0-9+/=-]+/g);
+  if (base64Like && base64Like.length > 0) {
+    const longest = base64Like.reduce((a, b) => (a.length >= b.length ? a : b));
+    if (longest.length > 20) return longest;
+  }
+  return normalized;
+}
+
 function copyToClipboardSafe(text: string): boolean {
   if (typeof window === "undefined" || !text) return false;
   try {
@@ -200,13 +214,23 @@ export function DemoContent() {
     joinAsPeer(offer).catch(() => setJoinStep("paste"));
   };
 
+  const normalizedAnswer = normalizePastedCode(answerInput);
+
+  const handleHostPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData?.getData("text") ?? "";
+    const code = extractCodeFromPaste(pasted);
+    if (code) {
+      setAnswerInput(code);
+      setConnectError(null);
+    }
+  };
+
   const handleHostConnect = async () => {
-    const answer = answerInput.trim();
-    if (!answer) return;
+    if (!normalizedAnswer) return;
     setConnectError(null);
     setConnectingInProgress(true);
     try {
-      await applyAnswerAsHost(answer);
+      await applyAnswerAsHost(normalizedAnswer);
       setAnswerInput("");
     } catch (err) {
       setConnectError(err instanceof Error ? err.message : "Connection failed");
@@ -348,18 +372,19 @@ export function DemoContent() {
                 </label>
                 <div className="flex gap-2">
                   <Input
-                    placeholder="Player 2 code"
+                    placeholder="Paste only the code (no extra text)"
                     value={answerInput}
                     onChange={(e) => {
                       setAnswerInput(e.target.value);
                       setConnectError(null);
                     }}
+                    onPaste={handleHostPaste}
                     className="font-mono text-sm"
                     disabled={connectingInProgress}
                   />
                   <Button
                     onClick={handleHostConnect}
-                    disabled={!answerInput.trim() || connectingInProgress}
+                    disabled={!normalizedAnswer || connectingInProgress}
                   >
                     {connectingInProgress ? "Connecting…" : "Connect"}
                   </Button>
@@ -416,8 +441,8 @@ export function DemoContent() {
                   <DialogTitle>Code for the host</DialogTitle>
                   <DialogDescription>
                     Send this code to the host (via WhatsApp, Telegram, or by
-                    copying). When they paste it in their browser and click
-                    Connect, the chat will open for both.
+                    copying). When they paste it and click Connect, the chat
+                    will open here and on their screen automatically.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="flex flex-col gap-2 py-2">
@@ -440,6 +465,12 @@ export function DemoContent() {
                     <Share className="mr-2 size-4" />
                     Share (WhatsApp, Telegram…)
                   </Button>
+                  {(status === "joining" || status === "connecting") && (
+                    <p className="text-muted-foreground text-sm">
+                      Waiting for the host to paste your code and click
+                      Connect…
+                    </p>
+                  )}
                 </div>
               </>
             )}
