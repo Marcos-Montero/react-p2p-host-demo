@@ -5,6 +5,8 @@ import {
   useP2PLink,
   useSharedState,
   useP2PContext,
+  RoomLinkQR,
+  AnswerQR,
 } from "react-p2p-host";
 import { Share } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { toast } from "sonner";
 
 type Message = {
   id: string;
@@ -188,6 +191,7 @@ export function DemoContent() {
   }, [status, isHost, connectionRef, setMessages]);
 
   const handleCreateRoom = async () => {
+    toast.loading("Creating room...", { id: "create-room" });
     const offer = await startAsHost();
     const link =
       typeof window !== "undefined"
@@ -198,6 +202,10 @@ export function DemoContent() {
     if (link) copyToClipboardSafe(link);
     setCreatedRoomLink(link);
     setShowLinkCopiedModal(true);
+    toast.success("Room created", {
+      id: "create-room",
+      description: "Link copied. Share it, then paste the code when you get it.",
+    });
   };
 
   const roomLink = createdRoomLink || getRoomLink(offerLink);
@@ -238,9 +246,23 @@ export function DemoContent() {
 
   const handleJoinSubmit = () => {
     const offer = extractOfferFromInput(joinInput);
-    if (!offer) return;
+    if (!offer) {
+      toast.warning("No link", { description: "Paste the room link first." });
+      return;
+    }
     setJoinStep("send-code");
-    joinAsPeer(offer).catch(() => setJoinStep("paste"));
+    toast.loading("Joining room...", { id: "join" });
+    joinAsPeer(offer)
+      .then(() => {
+        toast.success("Code ready", {
+          id: "join",
+          description: "Send this code to the host. When they paste it and connect, chat will open.",
+        });
+      })
+      .catch((err) => {
+        setJoinStep("paste");
+        toast.error("Join failed", { id: "join", description: String(err?.message ?? err) });
+      });
   };
 
   const normalizedAnswer = normalizePastedCode(answerInput);
@@ -251,21 +273,42 @@ export function DemoContent() {
     if (code) {
       setAnswerInput(code);
       setConnectError(null);
+      toast.info("Code pasted", {
+        description: `${code.length} chars. Connect button should be enabled.`,
+      });
+    } else {
+      toast.warning("No code detected", {
+        description: "Paste only the connection code from the other player.",
+      });
     }
   };
 
   const handleHostConnect = async () => {
-    if (!normalizedAnswer) return;
+    if (!normalizedAnswer) {
+      toast.warning("No code", { description: "Paste the code first." });
+      return;
+    }
     setConnectError(null);
     setConnectingInProgress(true);
+    toast.loading("Sending connection request...", { id: "connect" });
     try {
       let forLibrary = deduplicateCodeIfRepeated(normalizedAnswer);
       forLibrary = urlSafeBase64ToStandard(forLibrary);
       forLibrary = ensureBase64Padding(forLibrary);
+      toast.info("Applying answer", {
+        id: "connect",
+        description: `After dedup: ${forLibrary.length} chars. Calling library...`,
+      });
       await applyAnswerAsHost(forLibrary);
+      toast.success("Answer applied", {
+        id: "connect",
+        description: "Waiting for WebRTC to connect. Check status below.",
+      });
       setAnswerInput("");
     } catch (err) {
-      setConnectError(err instanceof Error ? err.message : "Connection failed");
+      const msg = err instanceof Error ? err.message : "Connection failed";
+      setConnectError(msg);
+      toast.error("Connection failed", { id: "connect", description: msg });
     } finally {
       setConnectingInProgress(false);
     }
@@ -300,6 +343,25 @@ export function DemoContent() {
       setConnectingInProgress(false);
     }
   }, [connected]);
+
+  const prevStatus = useRef(status);
+  useEffect(() => {
+    if (prevStatus.current !== status) {
+      toast.info(`Status: ${status}`, {
+        description:
+          status === "offer-ready"
+            ? "Share the link. When you get the code, paste it and click Connect."
+            : status === "connecting"
+              ? "WebRTC is negotiating. This may take a few seconds."
+              : status === "connected"
+                ? "Connected! Chat is ready."
+                : status === "error"
+                  ? "Connection failed. Try again or check the code."
+                  : undefined,
+      });
+      prevStatus.current = status;
+    }
+  }, [status]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -398,6 +460,16 @@ export function DemoContent() {
                 <Share className="mr-2 size-4" />
                 Share link (WhatsApp, Telegram…)
               </Button>
+              {roomLink ? (
+                <div className="flex flex-col items-center gap-2">
+                  <p className="text-muted-foreground text-sm">
+                    Or scan to join the room
+                  </p>
+                  <div className="rounded-lg border bg-white p-2">
+                    <RoomLinkQR link={roomLink} size={180} />
+                  </div>
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <label className="text-muted-foreground text-sm">
                   Paste the code the other player sends you:
@@ -497,6 +569,16 @@ export function DemoContent() {
                     <Share className="mr-2 size-4" />
                     Share (WhatsApp, Telegram…)
                   </Button>
+                  {answerToSend ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <p className="text-muted-foreground text-sm">
+                        Or host can scan this QR to get the code
+                      </p>
+                      <div className="rounded-lg border bg-white p-2">
+                        <AnswerQR answer={answerToSend} size={200} />
+                      </div>
+                    </div>
+                  ) : null}
                   {(status === "joining" || status === "connecting") && (
                     <p className="text-muted-foreground text-sm">
                       Waiting for the host to paste your code and click
