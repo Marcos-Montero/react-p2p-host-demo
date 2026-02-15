@@ -345,8 +345,11 @@ export function DemoContent() {
   }, [connected]);
 
   const prevStatus = useRef(status);
+  const connectingSince = useRef<number | null>(null);
   useEffect(() => {
     if (prevStatus.current !== status) {
+      if (status === "connecting") connectingSince.current = Date.now();
+      else connectingSince.current = null;
       toast.info(`Status: ${status}`, {
         description:
           status === "offer-ready"
@@ -361,6 +364,23 @@ export function DemoContent() {
       });
       prevStatus.current = status;
     }
+  }, [status]);
+
+  useEffect(() => {
+    if (status !== "connecting") return;
+    const t = setTimeout(() => {
+      const elapsed = connectingSince.current
+        ? (Date.now() - connectingSince.current) / 1000
+        : 0;
+      if (elapsed >= 12) {
+        toast.warning("Still connecting?", {
+          description:
+            "Try two tabs on the same device (same URL). If that works, the issue is network/NAT; some networks need a TURN relay.",
+          duration: 10000,
+        });
+      }
+    }, 15000);
+    return () => clearTimeout(t);
   }, [status]);
 
   return (
