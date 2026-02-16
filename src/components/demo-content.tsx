@@ -8,7 +8,7 @@ import {
   RoomLinkQR,
   AnswerQR,
 } from "react-p2p-host";
-import { Share } from "lucide-react";
+import { Share, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -32,7 +32,7 @@ import { toast } from "sonner";
 type Message = {
   id: string;
   text: string;
-  sender: "host" | "peer";
+  sender: string;
   timestamp: number;
 };
 
@@ -54,45 +54,6 @@ function extractOfferFromInput(raw: string): string {
 
 function normalizePastedCode(raw: string): string {
   return raw.trim().replace(/\s+/g, "");
-}
-
-function urlSafeBase64ToStandard(s: string): string {
-  return s.replace(/-/g, "+").replace(/_/g, "/");
-}
-
-function ensureBase64Padding(s: string): string {
-  const remainder = s.length % 4;
-  if (remainder === 0) return s;
-  return s + "=".repeat(4 - remainder);
-}
-
-function deduplicateCodeIfRepeated(s: string): string {
-  if (s.length < 80) return s;
-  const half = Math.floor(s.length / 2);
-  if (s.slice(0, half) === s.slice(half)) return s.slice(0, half);
-  for (let i = 1; i <= half; i++) {
-    if (s.startsWith(s.slice(i))) return s.slice(0, i);
-  }
-  return s;
-}
-
-function extractCodeFromPaste(pasted: string): string {
-  const normalized = normalizePastedCode(pasted);
-  const base64Like = normalized.match(/[A-Za-z0-9+/=-]+/g);
-  if (base64Like && base64Like.length > 0) {
-    const longest = base64Like.reduce((a, b) => (a.length >= b.length ? a : b));
-    if (longest.length > 20) {
-      const half = Math.floor(longest.length / 2);
-      if (
-        half > 20 &&
-        longest.slice(0, half) === longest.slice(half, half * 2)
-      ) {
-        return longest.slice(0, half);
-      }
-      return longest;
-    }
-  }
-  return normalized;
 }
 
 function copyToClipboardSafe(text: string): boolean {
@@ -130,14 +91,16 @@ export function DemoContent() {
   const {
     status,
     isHost,
+    connectedPeers,
     offerLink,
     answerToSend,
     startAsHost,
+    inviteNextPeer,
     joinAsPeer,
     applyAnswerAsHost,
     disconnect,
   } = useP2PLink();
-  const { connectionRef } = useP2PContext();
+  const { connectionRef, lastMessage } = useP2PContext();
   const [messages, setMessages] = useSharedState<{ messages: Message[] }>({
     messages: [],
   });
@@ -149,7 +112,6 @@ export function DemoContent() {
   const [createdRoomLink, setCreatedRoomLink] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectingInProgress, setConnectingInProgress] = useState(false);
-  const onMessageRegistered = useRef(false);
   const hasJoinedFromUrl = useRef(false);
 
   useEffect(() => {
@@ -167,28 +129,25 @@ export function DemoContent() {
     }
   }, [joinAsPeer, status]);
 
+  const connected = status === "connected";
+
+  const lastProcessedMsg = useRef<string | null>(null);
   useEffect(() => {
-    if (status !== "connected" || !isHost || !connectionRef.current) return;
-    if (onMessageRegistered.current) return;
-    onMessageRegistered.current = true;
-    connectionRef.current.setCallbacks({
-      onMessage: (data: string) => {
-        try {
-          const msg = JSON.parse(data) as Message;
-          if (msg.id && msg.text && msg.sender && msg.timestamp) {
-            setMessages((prev) => ({
-              messages: [...prev.messages, msg],
-            }));
-          }
-        } catch {
-          // ignore
-        }
-      },
-    });
-    return () => {
-      onMessageRegistered.current = false;
-    };
-  }, [status, isHost, connectionRef, setMessages]);
+    if (!isHost || !lastMessage || lastMessage === lastProcessedMsg.current) return;
+    lastProcessedMsg.current = lastMessage;
+    try {
+      const parsed = JSON.parse(lastMessage);
+      if (parsed.id && parsed.text && parsed.sender && parsed.timestamp) {
+        const msg = parsed as Message;
+        setMessages((prev) => {
+          if (prev.messages.some((m) => m.id === msg.id)) return prev;
+          return { messages: [...prev.messages, msg] };
+        });
+      }
+    } catch {
+      // ignore non-chat messages
+    }
+  }, [isHost, lastMessage, setMessages]);
 
   const handleCreateRoom = async () => {
     toast.loading("Creating room...", { id: "create-room" });
@@ -208,6 +167,21 @@ export function DemoContent() {
     });
   };
 
+  const handleInviteAnother = async () => {
+    toast.loading("Generating invite link...", { id: "invite" });
+    const link = await inviteNextPeer();
+    if (link) copyToClipboardSafe(link);
+    setCreatedRoomLink(link);
+    setAnswerInput("");
+    setConnectError(null);
+    setConnectingInProgress(false);
+    setShowLinkCopiedModal(true);
+    toast.success("New invite link copied", {
+      id: "invite",
+      description: "Share this link with the next player.",
+    });
+  };
+
   const roomLink = createdRoomLink || getRoomLink(offerLink);
 
   const handleShareLink = async () => {
@@ -216,7 +190,6 @@ export function DemoContent() {
       if (typeof navigator !== "undefined" && navigator.share) {
         await navigator.share({
           title: "P2P room",
-          text: "Join my room",
           url: roomLink,
         });
       } else {
@@ -233,7 +206,6 @@ export function DemoContent() {
       if (typeof navigator !== "undefined" && navigator.share) {
         await navigator.share({
           title: "Connection code",
-          text: "Paste this code in the host's browser to connect:",
           url: answerToSend,
         });
       } else {
@@ -268,18 +240,12 @@ export function DemoContent() {
   const normalizedAnswer = normalizePastedCode(answerInput);
 
   const handleHostPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
     const pasted = e.clipboardData?.getData("text") ?? "";
-    const code = extractCodeFromPaste(pasted);
+    const code = normalizePastedCode(pasted);
     if (code) {
       setAnswerInput(code);
       setConnectError(null);
-      toast.info("Code pasted", {
-        description: `${code.length} chars. Connect button should be enabled.`,
-      });
-    } else {
-      toast.warning("No code detected", {
-        description: "Paste only the connection code from the other player.",
-      });
     }
   };
 
@@ -290,20 +256,10 @@ export function DemoContent() {
     }
     setConnectError(null);
     setConnectingInProgress(true);
-    toast.loading("Sending connection request...", { id: "connect" });
+    toast.loading("Connecting...", { id: "connect" });
     try {
-      let forLibrary = deduplicateCodeIfRepeated(normalizedAnswer);
-      forLibrary = urlSafeBase64ToStandard(forLibrary);
-      forLibrary = ensureBase64Padding(forLibrary);
-      toast.info("Applying answer", {
-        id: "connect",
-        description: `After dedup: ${forLibrary.length} chars. Calling library...`,
-      });
-      await applyAnswerAsHost(forLibrary);
-      toast.success("Answer applied", {
-        id: "connect",
-        description: "Waiting for WebRTC to connect. Check status below.",
-      });
+      await applyAnswerAsHost(normalizedAnswer);
+      toast.success("Connected", { id: "connect" });
       setAnswerInput("");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Connection failed";
@@ -332,7 +288,6 @@ export function DemoContent() {
   };
 
   const [chatInput, setChatInput] = useState("");
-  const connected = status === "connected";
 
   useEffect(() => {
     if (connected) {
@@ -390,8 +345,9 @@ export function DemoContent() {
           react-p2p-host
         </h1>
         <p className="mx-auto mt-3 max-w-xl text-muted-foreground text-sm leading-relaxed md:text-base">
-          Connect two players in a P2P room in the browser, no server. Create
-          the room and share the link, or join by pasting the one you receive.
+          Connect multiple players in a P2P room in the browser, no server.
+          Create the room and share the link, or join by pasting the one you
+          receive.
         </p>
         {isLocalOrInsecureContext() && (
           <div className="bg-amber-500/10 border-amber-500/30 mx-auto mt-4 max-w-xl rounded-lg border px-4 py-3 text-left text-sm">
@@ -442,6 +398,12 @@ export function DemoContent() {
           <p className="text-muted-foreground text-center text-sm">
             {status === "creating-offer" && "Creating room…"}
             {(status === "joining" || status === "connecting") && "Connecting…"}
+            {status === "error" && (
+              <span className="text-destructive text-xs">
+                Invalid code or connection failed. Copy the code again without
+                extra spaces.
+              </span>
+            )}
             {(status === "disconnected" || status === "error") && (
               <>
                 <Button variant="link" className="p-0 h-auto" onClick={disconnect}>
@@ -463,12 +425,13 @@ export function DemoContent() {
         <Dialog open={showLinkCopiedModal} onOpenChange={setShowLinkCopiedModal}>
           <DialogContent showCloseButton={true}>
             <DialogHeader>
-              <DialogTitle>Room link copied</DialogTitle>
+              <DialogTitle>
+                {connectedPeers > 0 ? "Invite another player" : "Room link copied"}
+              </DialogTitle>
               <DialogDescription>
-                The link has been copied to your clipboard. Share it via
-                WhatsApp, Telegram, or any app. When the other player joins,
-                they will send you a code; paste it below to open the chat for
-                both.
+                {connectedPeers > 0
+                  ? "Share this new link with the next player. When they join, paste their code below."
+                  : "The link has been copied to your clipboard. Share it via WhatsApp, Telegram, or any app. When the other player joins, they will send you a code; paste it below to open the chat for both."}
               </DialogDescription>
             </DialogHeader>
             <div className="flex flex-col gap-4 py-2">
@@ -614,16 +577,27 @@ export function DemoContent() {
 
         {connected && (
           <>
-            <div className="flex justify-end">
-              <Button variant="ghost" size="sm" onClick={disconnect}>
-                Disconnect
-              </Button>
+            <div className="flex items-center justify-between">
+              <p className="text-muted-foreground text-sm">
+                {connectedPeers} player{connectedPeers !== 1 ? "s" : ""} connected
+              </p>
+              <div className="flex gap-2">
+                {isHost && (
+                  <Button variant="outline" size="sm" onClick={handleInviteAnother}>
+                    <UserPlus className="mr-2 size-4" />
+                    Invite another
+                  </Button>
+                )}
+                <Button variant="ghost" size="sm" onClick={disconnect}>
+                  Disconnect
+                </Button>
+              </div>
             </div>
             <Card>
               <CardHeader>
                 <CardTitle>Chat</CardTitle>
                 <CardDescription>
-                  Real-time messages between host and player 2.
+                  Real-time messages between all connected players.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -644,7 +618,7 @@ export function DemoContent() {
                           }`}
                         >
                           <span className="text-muted-foreground font-medium text-xs">
-                            {msg.sender === "host" ? "Host" : "Player 2"}:
+                            {msg.sender === "host" ? "Host" : "Player"}:
                           </span>{" "}
                           {msg.text}
                         </div>
