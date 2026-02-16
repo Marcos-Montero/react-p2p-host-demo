@@ -99,6 +99,7 @@ export function DemoContent() {
     joinAsPeer,
     applyAnswerAsHost,
     disconnect,
+    recoveredSession,
   } = useP2PLink();
   const { connectionRef, lastMessage } = useP2PContext();
   const [messages, setMessages] = useSharedState<{ messages: Message[] }>({
@@ -113,6 +114,7 @@ export function DemoContent() {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectingInProgress, setConnectingInProgress] = useState(false);
   const hasJoinedFromUrl = useRef(false);
+  const hasRecoveredRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined" || hasJoinedFromUrl.current) return;
@@ -128,6 +130,21 @@ export function DemoContent() {
       });
     }
   }, [joinAsPeer, status]);
+
+  useEffect(() => {
+    if (!recoveredSession || hasRecoveredRef.current || hasJoinedFromUrl.current) return;
+    if (isHost && status === "idle") {
+      hasRecoveredRef.current = true;
+      toast.info("Session recovered", {
+        description: "Your previous chat was restored. Share a new link to reconnect players.",
+      });
+      startAsHost().then((link) => {
+        copyToClipboardSafe(link);
+        setCreatedRoomLink(link);
+        setShowLinkCopiedModal(true);
+      });
+    }
+  }, [recoveredSession, isHost, status, startAsHost]);
 
   const connected = status === "connected";
 

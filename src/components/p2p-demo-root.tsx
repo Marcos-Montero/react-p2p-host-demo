@@ -5,7 +5,7 @@ import { DemoContent } from "@/components/demo-content";
 
 export function P2PDemoRoot() {
   return (
-    <P2PProvider>
+    <P2PProvider persist={{ key: "demo-chat" }}>
       <DemoContent />
     </P2PProvider>
   );
